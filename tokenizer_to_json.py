@@ -2,7 +2,7 @@
 import json
 import tensorflow as tf
 
-def save_tokenizer(tokenizer):
+def save_tokenizer(tokenizer, save_path):
     # get the configuration
     config = tokenizer.get_config()
     
@@ -15,11 +15,11 @@ def save_tokenizer(tokenizer):
     }
     
     # save to json
-    with open("tokenizer.json", "w") as f:
+    with open(save_path, "w") as f:
         json.dump(vectorizer_data, f)
         
-def load_tokenizer():
-    with open("tokenizer.json", "r") as f:
+def load_tokenizer(load_path):
+    with open(load_path, "r") as f:
         vectorizer_data = json.load(f)
         
     config = vectorizer_data["config"]
@@ -30,4 +30,10 @@ def load_tokenizer():
     tokenizer.set_vocabulary(vocab)
     
     return tokenizer
-# %%
+# %% ################## COMMENTS ##################
+
+# the reason why we do it this way is because this layer doesnt have a to_json method
+# so need to get the configuration and vocab manually
+# and then recreate the layer when the load_tokenizer is call 
+
+####################################################

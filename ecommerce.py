@@ -107,7 +107,7 @@ features = df_copy
 print(label.head())
 print(features.head())
 # %% Data Splitting
-X_train, X_split, y_train, y_split = train_test_split(features, label, test_size=0.25, random_state=SEED, shuffle=True)
+X_train, X_split, y_train, y_split = train_test_split(features, label, test_size=0.2, random_state=SEED, shuffle=True)
 X_val, X_test, y_val, y_test = train_test_split(X_split, y_split, test_size=0.5, random_state=SEED, shuffle=True)
 
 print("train: ", X_train.shape, y_train.shape)
@@ -115,6 +115,11 @@ print("val: ", X_val.shape, y_val.shape)
 print("test: ", X_test.shape, y_test.shape)
 
 # %% Data Preprocessing [Part C]
+
+############# COMMENTS ##############
+# TextVectorizer already does the preprocessing for us
+# in term of encoding, stripping punctuation, lowercase
+################################################
 
 tokenizer = tf.keras.layers.TextVectorization(max_tokens=VOCAB_SIZE, output_sequence_length=SEQUENCE_LENGTH)
 
@@ -157,13 +162,21 @@ embedding = layers.Embedding(VOCAB_SIZE, EMBEDDING_DIM)
 log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 tensorboard_callback = callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
 
+# early_stopping
+early_stopping = callbacks.EarlyStopping(
+    monitor="val_loss",
+    patience=3,
+    restore_best_weights=True
+)
 # regularizer [Fine Tuning]
-l1 = regularizers.L1(l1=0.1)
-l2 = regularizers.L2(l2=0.2)
-l1l2 = regularizers.L1L2()
+l1 = regularizers.L1(l1=0.002)
+l2 = regularizers.L2(l2=0.002)
+l1l2 = regularizers.L1L2(l1=0.002, l2=0.002)
 #%% Model Development
 
 model = Sequential()
+
+# SEQUENCE_LENGTH instead of None, because we know the length of the input
 model.add(layers.Input(shape=(SEQUENCE_LENGTH,)))
 model.add(embedding) # at ths point this is in 3d tensor
 
@@ -185,15 +198,8 @@ model.add(layers.SpatialDropout1D(0.2))
 ###########################################
 model.add(layers.Conv1D(64, kernel_size=3, activation="relu"))
 # LSTM
-model.add(layers.LSTM(64))
-
-# dense layers
-model.add(layers.Dense(64,kernel_regularizer=l2))
-model.add(layers.BatchNormalization())
-model.add(layers.Activation("relu"))
-model.add(layers.Dense(8, activation="relu", kernel_regularizer=l2))
-# model.add(layers.Dense(16, activation="relu", kernel_regularizer=l2))
-
+model.add(layers.Bidirectional(layers.LSTM(64, dropout=0.2, recurrent_dropout=0.2)))
+model.add(layers.Dense(64, activation="relu", kernel_regularizer=l2))
 # output layer
 model.add(layers.Dense(4, activation="softmax"))
 model.summary()
@@ -203,10 +209,10 @@ model.compile(loss="sparse_categorical_crossentropy", optimizer="adam", metrics=
 
 model.fit(x=X_train, 
           y=y_train, 
-          epochs=10, 
+          epochs=15, 
           validation_data=(X_val, y_val), 
           batch_size=BATCH_SIZE,
-          callbacks=[tensorboard_callback])
+          callbacks=[tensorboard_callback, early_stopping])
 
 # %% Model Evaluation
 
@@ -214,23 +220,37 @@ loss, accuracy = model.evaluate(X_test, y_test)
 print("Test accuracy: ", accuracy)
 
 # using f1 score to evaluate the model
-y_pred = model.predict(X_test)
-y_pred = np.argmax(y_pred, axis=1)
-f1_score = f1_score(y_test, y_pred, average='macro') # use macro because all class are treated equally in term of importance
-print("F1 score: ", f1_score)
+y_pred = np.argmax(model.predict(X_test), axis=1)
+f1 = f1_score(y_test, y_pred, average='macro') # use macro because all class are treated equally in term of importance
+print("F1 score: ", f1)
 
 print("Classification Report:\n", classification_report(y_test, y_pred))
 
 # %% ################# Saving the model and tokenizer #################
 
-# [A] Tokenizer
-with open(PATH_TO_SAVE_TOKENIZER, "w") as f:
-    f.write(tokenizer.to_json())
+# Here i already created a helper module for saving and loading the tokenizer
 
+# ----------------------------------------------------------------
+# [A] Tokenizer
+save_tokenizer(tokenizer, PATH_TO_SAVE_TOKENIZER)
+
+# let's try loading the tokenizer
+loaded_tokenizer = load_tokenizer(PATH_TO_SAVE_TOKENIZER)
+
+# lets just use the existing sample_text, 
+# and then compare sample_token with sample_token_2 to ensure that they are the same
+sample_token_2 = loaded_tokenizer(sample_text) 
+if (sample_token.numpy() == sample_token_2.numpy()).all():
+    print("The tokenizers are the same")
+else:
+    print("The tokenizers are not the same")
+
+# ----------------------------------------------------------------
 # [B] Model
+
 model.save(PATH_TO_SAVE_MODEL)
 
-#%%
-
-print(dir(tokenizer))
-# %%
+# %% ################ SUMMARY #####################
+# the model is overfitting no matter how i change the architecture. 
+# However, this is the best val_loss that i can produce, maintaning a high test_accuracy and val_accuracu
+##################################################
