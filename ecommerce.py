@@ -8,6 +8,7 @@ import seaborn as sns
 import tensorflow as tf
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score, confusion_matrix, classification_report
 from tensorflow.keras import layers, models, optimizers, callbacks, metrics, losses, activations, regularizers, initializers, Sequential
 import tensorboard
 #%% 2. Defining Constant
@@ -18,6 +19,7 @@ SEED = 42
 VOCAB_SIZE = 10000
 SEQUENCE_LENGTH = 50 # for padding or truncating
 EMBEDDING_DIM = 32
+BATCH_SIZE = 64
 #%% Data Loading
 
 df = pd.read_csv(CSV_PATH, names=["categories", 'product_and_description'])
@@ -144,17 +146,40 @@ embedding = layers.Embedding(VOCAB_SIZE, EMBEDDING_DIM)
 # from tensorflow documentation:
 log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 tensorboard_callback = callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+
+# regularizer [Fine Tuning]
+l1 = regularizers.L1()
+l2 = regularizers.L2()
+l1l2 = regularizers.L1L2()
 #%% Model Development
 
 model = Sequential()
-model.add(embedding)
+model.add(layers.Input(shape=(SEQUENCE_LENGTH,)))
+model.add(embedding) # at ths point this is in 3d tensor
 
+########## COMMENTS ######################
+# This layer performs the same function as Dropout, however, it drops entire 1D feature maps instead of individual elements. 
+# If adjacent frames within feature maps are strongly correlated (as is normally the case in early convolution layers) 
+# then regular dropout will not regularize the activations and will otherwise just result in an effective learning rate decrease. 
+# In this case, SpatialDropout1D will help promote independence between feature maps and should be used instead.
+# (From keras documentation)
+##################################################
+
+model.add(layers.SpatialDropout1D(0.2))
+
+########## COMMENTS ######################
+# This layer creates a convolution kernel that is convolved with the layer input over a single spatial (or temporal) dimension to produce a tensor of outputs.
+# e.g. Initial shape : (4, 10, 128)
+# Conv1D layer : keras.layers.Conv1D(32, 3, activation='relu') where 32 is number of filters, 3 is filter size.
+# After Conv1D : (4, 8, 32)
+###########################################
+model.add(layers.Conv1D(64, kernel_size=3, activation="relu"))
 # LSTM
 model.add(layers.LSTM(64))
 
 # dense layers
 model.add(layers.Dense(64, activation="relu"))
-model.add(layers.Dense(32, activation="relu"))
+model.add(layers.Dense(32, activation="relu", kernel_regularizer=l1))
 model.add(layers.Dense(16, activation="relu"))
 
 # output layer
@@ -168,4 +193,19 @@ model.fit(x=X_train,
           y=y_train, 
           epochs=5, 
           validation_data=(X_val, y_val), 
+          batch_size=BATCH_SIZE,
           callbacks=[tensorboard_callback])
+
+# %% Model Evaluation
+
+loss, accuracy = model.evaluate(X_test, y_test)
+print("Test accuracy: ", accuracy)
+
+# using f1 score to evaluate the model
+y_pred = model.predict(X_test)
+y_pred = np.argmax(y_pred, axis=1)
+f1_score = f1_score(y_test, y_pred, average='macro') # use macro because all class are treated equally in term of importance
+print("F1 score: ", f1_score)
+
+print("Classification Report:\n", classification_report(y_test, y_pred))
+# %%
