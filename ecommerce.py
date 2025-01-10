@@ -1,11 +1,13 @@
 #%% 1. Import libraries
 import os
 import datetime
+import json
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import tensorflow as tf
+from tokenizer_to_json import save_tokenizer, load_tokenizer
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, confusion_matrix, classification_report
@@ -15,6 +17,8 @@ import tensorboard
 
 print(os.getcwd())
 CSV_PATH = os.path.join(os.getcwd(), "DATASET", "ecommerceDataset.csv")
+PATH_TO_SAVE_TOKENIZER = os.path.join(os.getcwd(), "saved_models", "tokenizer.json")
+PATH_TO_SAVE_MODEL = os.path.join(os.getcwd(), "saved_models", "model.h5")
 SEED = 42
 VOCAB_SIZE = 10000
 SEQUENCE_LENGTH = 50 # for padding or truncating
@@ -74,6 +78,10 @@ print(df.isna().sum())
 print("-----------------------------------------------\n")
 print("duplicates:", df.duplicated().sum())
 print("-----------------------------------------------\n")
+
+plt.figure(figsize=(10, 10))
+sns.countplot(df['categories'])
+plt.show()
 
 #%% Data preprocessing [Part B]
 
@@ -137,6 +145,8 @@ X_test = tokenizer(X_test)
 print("train: ", X_train.shape, y_train.shape)
 print("val: ", X_val.shape, y_val.shape)
 print("test: ", X_test.shape, y_test.shape)
+
+# saving the tokenizer
 # %% Data Preprocessing [Part D]
 
 # Embedding
@@ -148,8 +158,8 @@ log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 tensorboard_callback = callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
 
 # regularizer [Fine Tuning]
-l1 = regularizers.L1()
-l2 = regularizers.L2()
+l1 = regularizers.L1(l1=0.1)
+l2 = regularizers.L2(l2=0.2)
 l1l2 = regularizers.L1L2()
 #%% Model Development
 
@@ -178,9 +188,11 @@ model.add(layers.Conv1D(64, kernel_size=3, activation="relu"))
 model.add(layers.LSTM(64))
 
 # dense layers
-model.add(layers.Dense(64, activation="relu"))
-model.add(layers.Dense(32, activation="relu", kernel_regularizer=l1))
-model.add(layers.Dense(16, activation="relu"))
+model.add(layers.Dense(64,kernel_regularizer=l2))
+model.add(layers.BatchNormalization())
+model.add(layers.Activation("relu"))
+model.add(layers.Dense(8, activation="relu", kernel_regularizer=l2))
+# model.add(layers.Dense(16, activation="relu", kernel_regularizer=l2))
 
 # output layer
 model.add(layers.Dense(4, activation="softmax"))
@@ -191,7 +203,7 @@ model.compile(loss="sparse_categorical_crossentropy", optimizer="adam", metrics=
 
 model.fit(x=X_train, 
           y=y_train, 
-          epochs=5, 
+          epochs=10, 
           validation_data=(X_val, y_val), 
           batch_size=BATCH_SIZE,
           callbacks=[tensorboard_callback])
@@ -208,4 +220,17 @@ f1_score = f1_score(y_test, y_pred, average='macro') # use macro because all cla
 print("F1 score: ", f1_score)
 
 print("Classification Report:\n", classification_report(y_test, y_pred))
+
+# %% ################# Saving the model and tokenizer #################
+
+# [A] Tokenizer
+with open(PATH_TO_SAVE_TOKENIZER, "w") as f:
+    f.write(tokenizer.to_json())
+
+# [B] Model
+model.save(PATH_TO_SAVE_MODEL)
+
+#%%
+
+print(dir(tokenizer))
 # %%
